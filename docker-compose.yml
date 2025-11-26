@@ -1,0 +1,10 @@
+services:
+  mytools:
+    build: .
+    container_name: mytools
+    ports:
+      - "8501:8501"
+    volumes:
+      - /media/ZimaOS-HD/Media/Music:/app/downloads
+    restart: unless-stopped
+
