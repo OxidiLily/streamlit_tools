@@ -4,6 +4,7 @@ import os
 from openai import OpenAI
 import json
 
+
 # Page Config
 st.set_page_config(page_title="Data Generator", layout="wide")
 

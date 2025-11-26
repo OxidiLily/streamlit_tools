@@ -1,6 +1,6 @@
 [client]
 showErrorDetails = false
-toolbarMode = "viewer"
+toolbarMode = "minimal"
 
 [server]
 enableXsrfProtection = true        # Keamanan WAJIB
@@ -12,6 +12,6 @@ gatherUsageStats = false           # Privacy user
 
 [theme]
 primaryColor = "#FF4B4B"
-backgroundColor = "#FFFFFF"
+backgroundColor = "#000000ff"
 secondaryBackgroundColor = "#F0F2F6"
 textColor = "#262730"

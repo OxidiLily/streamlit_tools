@@ -9,7 +9,7 @@ DOWNLOADS_DIR = "downloads"
 
 # Ensure the directory exists
 if not os.path.exists(DOWNLOADS_DIR):
-    st.error(f"Please download some music first.")
+    st.error(f"Directory '{DOWNLOADS_DIR}' not found. Please download some music first.")
 else:
     # Get list of mp3 files
     mp3_files = glob.glob(os.path.join(DOWNLOADS_DIR, "*.mp3"))

@@ -2,6 +2,14 @@ import streamlit as st
 
 st.set_page_config(page_title="OxidiLily Tools",page_icon="✨", layout="wide")
 
+
+st.markdown("""
+    <style>
+        #MainMenu {visibility: hidden;}
+        .stDeployButton {display:none;}
+    </style>
+    """, unsafe_allow_html=True)
+
 pages = {
     "Home": [
         st.Page("pages/welcome.py", title="Welcome"),
