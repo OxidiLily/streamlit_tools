@@ -5,24 +5,50 @@ import requests
 from openai import OpenAI
 import base64
 from io import BytesIO
+import time
 
 # Page config
 st.set_page_config(page_title="Fal.ai Creative Studio", layout="wide")
 
 # Sidebar for API Keys
 st.sidebar.title="Configuration"
-fal_key = st.sidebar.text_input("FAL_KEY", type="password", value=os.environ.get("FAL_KEY", ""))
-deepseek_key = st.sidebar.text_input("DEEPSEEK_API_KEY", type="password", value=os.environ.get("DEEPSEEK_API_KEY", ""))
+
+# Initialize session state for API keys if not exists
+if 'fal_key' not in st.session_state:
+    st.session_state.fal_key = os.environ.get("FAL_KEY", "")
+if 'deepseek_key' not in st.session_state:
+    st.session_state.deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "")
+
+# Delete button BEFORE input fields
+# Input fields using session_state
+fal_key = st.sidebar.text_input("FAL_KEY", type="password", value=st.session_state.fal_key, key="fal_input")
+deepseek_key = st.sidebar.text_input("DEEPSEEK_API_KEY", type="password", value=st.session_state.deepseek_key, key="deepseek_input")
+delete_key = st.sidebar.button("Delete API Key")
+if delete_key:
+    # Clear all sources
+    st.session_state.fal_key = ""
+    st.session_state.deepseek_key = ""
+    os.environ["DEEPSEEK_API_KEY"] = ""
+    os.environ["FAL_KEY"] = ""
+    st.sidebar.success("API Key deleted!")
+    time.sleep(4)
+    st.rerun()
+
 
 st.sidebar.divider()
 st.sidebar.subheader("💾 Local Storage")
 auto_save = st.sidebar.checkbox("Auto-save generated files", value=True)
 save_dir = st.sidebar.text_input("Save directory", value="./generated_files")
 
+# Update both session_state and os.environ when keys are entered
 if fal_key:
+    st.session_state.fal_key = fal_key
     os.environ["FAL_KEY"] = fal_key
 if deepseek_key:
+    st.session_state.deepseek_key = deepseek_key
     os.environ["DEEPSEEK_API_KEY"] = deepseek_key
+
+
 
 st.title("Fal.ai Creative Studio")
 

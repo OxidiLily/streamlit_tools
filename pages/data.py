@@ -3,7 +3,7 @@ import pandas as pd
 import os
 from openai import OpenAI
 import json
-
+import time
 
 # Page Config
 st.set_page_config(page_title="Data Generator", layout="wide")
@@ -13,6 +13,13 @@ st.title("🤖 DeepSeek Data Generator")
 # Sidebar Configuration
 st.sidebar.header("Configuration")
 deepseek_key = st.sidebar.text_input("DeepSeek API Key", type="password", value=os.environ.get("DEEPSEEK_API_KEY", ""))
+
+delete_key = st.sidebar.button("Delete API Key")
+if delete_key:
+    os.environ["DEEPSEEK_API_KEY"] = ""
+    st.sidebar.success("API Key deleted!")
+    time.sleep(1)
+    st.rerun()
 
 if deepseek_key:
     os.environ["DEEPSEEK_API_KEY"] = deepseek_key
@@ -27,13 +34,11 @@ if uploaded_file is not None:
         with open("n8n.csv", "wb") as f:
             f.write(uploaded_file.getbuffer())
         st.sidebar.success("✅ File replaced! Reloading...")
+        time.sleep(0.5)  # Give time for file to be written
         st.rerun()
 
-# Constants - use uploaded file temporarily if available, otherwise use local n8n.csv
-if uploaded_file is not None:
-    CSV_FILE = uploaded_file
-else:
-    CSV_FILE = "n8n.csv"
+# Always use n8n.csv as the main data source
+CSV_FILE = "n8n.csv"
 
 # Input Parameters
 col1, col2 = st.columns(2)
@@ -51,46 +56,109 @@ def load_existing_data():
 def generate_data(api_key, topic, count):
     client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
     
-    system_prompt = """You are a data generator. Generate a JSON object containing a list of items.
-    The list should be under the key 'data'.
-    Each item must have these fields:
-    - story: string (a short creative story about the topic)
-    - aspect_ratio: string (e.g., '9:16', '16:9', '1:1')
-    - resolution: string (e.g., '480p', '720p', '1080p')
-    - duration: integer (duration in seconds, between 2 and 12)
-    - number_of_scene: integer (MUST be between 1 and 5, default to 1)
-    - status: string (default 'pending')
-    - scenes: list of objects, where each object has:
-        - title: string (short title of the scene)
-        - prompt: string (visual prompt for the scene)
+    # More concise prompt to avoid large responses
+    system_prompt = """You are a data generator. Generate ONLY a JSON object with key "data" containing a list.
+
+        RULES:
+        - Output JSON only. No commentary, no code block.
+        - All content must be realistic. NO fantasy, NO mutation, NO biological transformation, NO object transformation.
+
+        Each item MUST contain:
+        - story: string (<= 200 characters, short creative story, realistic nature or human scenes, natural movement)
+        - aspect_ratio: "9:16"
+        - resolution: "480p"
+        - duration: integer (2-12)
+        - number_of_scene: integer (3-5)
+        - status: "pending"
+        - scenes: list of objects with:
+            - title: string (<= 50 characters, realistic)
+            - prompt: string (<= 300 characters, realistic visual description, natural movement, no mutation, no object transformation)
+
+        CRITICAL:
+        - scenes.length MUST equal number_of_scene. If mismatch, JSON is invalid.
+
+        Output ONLY valid JSON."""
     
-    The number of items in 'scenes' MUST match 'number_of_scene'.
-    Do NOT include row_number or index in the JSON.
-    Output ONLY valid JSON."""
+    user_prompt = f"Generate {count} rows about '{topic}'."
     
-    user_prompt = f"Generate {count} rows of data about '{topic}'. Ensure 'scenes' are detailed and match 'number_of_scene'."
-    
-    try:
-        response = client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format={ "type": "json_object" },
-            temperature=0.7
-        )
-        
-        content = response.choices[0].message.content
-        data = json.loads(content)
-        
-        if 'data' in data:
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                response_format={ "type": "json_object" },
+                temperature=0.7,
+                max_tokens=6000  # Increased token limit untuk mengakomodasi lebih banyak rows
+            )
+            
+            content = response.choices[0].message.content
+            
+            # Debug: Show response length
+            if attempt == 0:
+                st.info(f"📊 API Response size: {len(content)} characters")
+            
+            # Try to clean the content before parsing
+            content = content.strip()
+            
+            # Attempt to parse JSON
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError as je:
+                # Show detailed error with content preview
+                st.error(f"❌ JSON Parse Error (Attempt {attempt+1}/{max_retries})")
+                st.error(f"Error: {str(je)}")
+                
+                # Show problematic part of JSON
+                error_pos = je.pos
+                start = max(0, error_pos - 100)
+                end = min(len(content), error_pos + 100)
+                
+                with st.expander("🔍 View Error Location in JSON"):
+                    st.code(f"...{content[start:end]}...", language="json")
+                
+                if attempt < max_retries - 1:
+                    st.warning("⏳ Retrying with more strict prompt...")
+                    time.sleep(1)
+                    continue
+                else:
+                    st.error("❌ Failed to parse JSON after retries. **Try reducing 'Number of Rows' or simplifying the topic.**")
+                    return None
+            
+            # Validate JSON structure
+            if 'data' not in data:
+                st.error("JSON missing 'data' key")
+                if attempt < max_retries - 1:
+                    continue
+                return None
+                
+            if not isinstance(data['data'], list):
+                st.error("'data' must be a list")
+                if attempt < max_retries - 1:
+                    continue
+                return None
+            
+            # Process the data
             df = pd.DataFrame(data['data'])
+            
+            if df.empty:
+                st.error("Generated data is empty")
+                return None
+            
+            # Debug: Check if we got the requested number of rows
+            rows_generated = len(df)
+            if rows_generated < count:
+                st.warning(f"⚠️ API only generated {rows_generated} rows out of {count} requested. The prompt might be too strict or max_tokens limit was reached.")
+                st.info("💡 Try: 1) Reduce 'Number of Rows', 2) Simplify the topic, or 3) Make prompt less restrictive")
             
             # Ensure number_of_scene is valid
             if 'number_of_scene' not in df.columns:
                 df['number_of_scene'] = 1
             df['number_of_scene'] = df['number_of_scene'].fillna(1).astype(int)
+            df['number_of_scene'] = df['number_of_scene'].clip(1, 5)  # Ensure 1-5
             
             # Ensure aspect_ratio is valid
             if 'aspect_ratio' not in df.columns:
@@ -122,7 +190,7 @@ def generate_data(api_key, topic, count):
             
             for idx, row in df.iterrows():
                 scenes = row.get('scenes', [])
-                num_scenes = row['number_of_scene']
+                num_scenes = int(row['number_of_scene'])
                 
                 # If scenes is not a list, try to parse it or default to empty
                 if not isinstance(scenes, list):
@@ -131,8 +199,13 @@ def generate_data(api_key, topic, count):
                 # Fill available scenes
                 for i, scene in enumerate(scenes):
                     if i < 5:
-                        title = scene.get('title', '')
-                        prompt = scene.get('prompt', '')
+                        if isinstance(scene, dict):
+                            title = scene.get('title', '')
+                            prompt = scene.get('prompt', '')
+                        else:
+                            title = ''
+                            prompt = ''
+                        
                         # Fallback if empty
                         if not title: title = f"Scene {i+1}"
                         if not prompt: prompt = f"Visual for scene {i+1}"
@@ -145,25 +218,30 @@ def generate_data(api_key, topic, count):
                 if current_scene_count < num_scenes and current_scene_count < 5:
                     for i in range(current_scene_count, min(num_scenes, 5)):
                         df.at[idx, f'scene_{i+1}'] = f"Scene {i+1} (Auto-filled)"
-                        df.at[idx, f'scene_detail_{i+1}'] = f"Scene {i+1} visual description for {row.get('story', 'story')[:20]}..."
+                        df.at[idx, f'scene_detail_{i+1}'] = f"Scene {i+1} visual description for {str(row.get('story', 'story'))[:20]}..."
 
             # Drop the scenes column if it exists
             if 'scenes' in df.columns:
                 df = df.drop(columns=['scenes'])
-                
-            return df
-        else:
-            st.error("Invalid JSON structure received")
-            return None
             
-    except Exception as e:
-        st.error(f"Error generating data: {e}")
-        return None
+            st.success(f"✅ Successfully generated {len(df)} rows")
+            return df
+            
+        except Exception as e:
+            st.error(f"❌ Error on attempt {attempt+1}/{max_retries}: {str(e)}")
+            if attempt < max_retries - 1:
+                st.warning("⏳ Retrying...")
+                time.sleep(1)
+            else:
+                st.error("❌ **Failed after all retries.** Please try again with fewer rows or a simpler topic.")
+                return None
+    
+    return None
 
 # Main UI
 st.subheader("Current Data")
 existing_df = load_existing_data()
-st.dataframe(existing_df, width='stretch')
+st.dataframe(existing_df, use_container_width=True)
 
 col_btn1, col_btn2 = st.columns(2)
 
@@ -256,8 +334,8 @@ with col_btn2:
                         system_prompt = f"""Generate {num_scenes} scenes for this story. 
                         Return a JSON object with key 'scenes' containing a list of {num_scenes} scene objects.
                         Each scene object must have:
-                        - title: short scene title
-                        - prompt: visual description for the scene
+                        - title: short scene title (max 50 chars)
+                        - prompt: visual description for the scene (max 300 chars, realistic visuals with natural movement, no mutation, no transformation)
                         
                         Story: {story}
                         
